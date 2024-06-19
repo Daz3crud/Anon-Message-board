@@ -1,11 +1,9 @@
 'use strict';
 
 const mongoose = require('mongoose');
+mongoose.connect(process.env.DB, { useNewUrlParser: true, useUnifiedTopology: true });
 
-mongoose.connect(process.env.DB, ({useNewUrlParser: true, useUnifiedTopology: true}));
-
-module.exports = function (app) {
-
+module.exports = function(app) {
   const replySchema = new mongoose.Schema({
     created_on: String,
     text: String,
@@ -24,8 +22,9 @@ module.exports = function (app) {
     replies: [replySchema],
     password: String
   }));
+
   const Reply = mongoose.model('Reply', replySchema);
-  
+
   app.route('/api/threads/:board')
     .get((req, res) => {
       Message.find({ board: req.params.board })
@@ -38,7 +37,6 @@ module.exports = function (app) {
           }
           const messagesConsolidate = messages.map(message => {
             const container = {};
-
             container._id = message._id;
             container.created_on = message.created_on;
             container.bumped_on = message.bumped_on;
@@ -46,15 +44,12 @@ module.exports = function (app) {
             container.replycount = message.replycount;
             const repliesConsolidate = message.replies.slice(0, 3).map(reply => {
               const replyContainer = {};
-
               replyContainer._id = reply._id;
               replyContainer.created_on = reply.created_on;
               replyContainer.text = reply.text;
-
               return replyContainer;
             });
             container.replies = repliesConsolidate;
-
             return container;
           });
           res.json(messagesConsolidate);
@@ -84,30 +79,50 @@ module.exports = function (app) {
       });
     })
     .put((req, res) => {
-      Message.findOneAndUpdate({ board: req.params.board, _id: mongoose.Types.ObjectId(req.body.report_id) }, { reported: true }, { useFindAndModify: false }, (err, docs) => {
-        if (err) {
-          throw err;
-        }
-        if (!docs) {
-          res.send('invalid id');
-        } else {
+      console.log("PUT request to report a thread:", req.body); // Log the request body
+
+      const threadId = req.body.thread_id || req.body.report_id; // Ensure thread_id is being used correctly
+
+      if (!threadId) {
+        return res.status(400).send('thread_id is required');
+      }
+
+      console.log("Thread ID to report:", threadId); // Log the thread ID
+
+      Message.findOneAndUpdate(
+        { board: req.params.board, _id: mongoose.Types.ObjectId(threadId) },
+        { $set: { reported: true } },
+        { useFindAndModify: false },
+        (err, doc) => {
+          if (err) {
+            console.error("Error during findOneAndUpdate:", err); // Log error
+            return res.status(500).send('Server error');
+          }
+          if (!doc) {
+            console.log("Document not found for thread ID:", threadId); // Log missing document
+            return res.send('invalid id');
+          }
+          console.log("Thread reported successfully"); // Log success
           res.send('reported');
         }
-      });
+      );
     })
     .delete((req, res) => {
-      Message.findOneAndDelete({ _id: mongoose.Types.ObjectId(req.body.thread_id), delete_password: req.body.delete_password }, (err, doc) => {
-        if (err) {
-          throw err;
+      Message.findOneAndDelete(
+        { _id: mongoose.Types.ObjectId(req.body.thread_id), delete_password: req.body.delete_password },
+        (err, doc) => {
+          if (err) {
+            throw err;
+          }
+          if (!doc) {
+            res.send('incorrect password');
+          } else {
+            res.send('success');
+          }
         }
-        if (!doc) {
-          res.send('incorrect password')
-        } else {
-          res.send('success');
-        }
-      });
+      );
     });
-    
+
   app.route('/api/replies/:board')
     .get((req, res) => {
       Message.find({ board: req.params.board })
@@ -119,7 +134,6 @@ module.exports = function (app) {
             console.log(err);
           }
           const container = {};
-
           container._id = messages[0]._id;
           container.created_on = messages[0].created_on;
           container.bumped_on = messages[0].bumped_on;
@@ -127,15 +141,12 @@ module.exports = function (app) {
           container.replycount = messages[0].replycount;
           const repliesConsolidate = messages[0].replies.map(reply => {
             const replyContainer = {};
-
             replyContainer._id = reply._id;
             replyContainer.created_on = reply.created_on;
             replyContainer.text = reply.text;
-
             return replyContainer;
           });
           container.replies = repliesConsolidate;
-
           res.json(container);
         });
     })
@@ -154,48 +165,53 @@ module.exports = function (app) {
       res.json(doc);
     })
     .put((req, res) => {
-      Message.findOne({ board: req.params.board, _id: mongoose.Types.ObjectId(req.body.thread_id) }, async (err, doc) => {
-        if (err) {
-          throw err;
-        }
-        if (!doc) {
-          res.send("invalid thread ID");
-        } else {
-          const result = doc.replies.findIndex(({ _id }) => {
-            return JSON.stringify(_id) === `"${req.body.reply_id}"`;
-          });
-          if (isNaN(result)) {
-            res.send('invalid reply ID');
+      Message.findOne(
+        { board: req.params.board, _id: mongoose.Types.ObjectId(req.body.thread_id) },
+        async (err, doc) => {
+          if (err) {
+            throw err;
+          }
+          if (!doc) {
+            res.send("invalid thread ID");
           } else {
-            doc.replies[result].reported = true;
-            await doc.save();
-            res.send('reported');
+            const result = doc.replies.findIndex(({ _id }) => {
+              return JSON.stringify(_id) === `"${req.body.reply_id}"`;
+            });
+            if (isNaN(result)) {
+              res.send('invalid reply ID');
+            } else {
+              doc.replies[result].reported = true;
+              await doc.save();
+              res.send('reported');
+            }
           }
         }
-      });
+      );
     })
     .delete((req, res) => {
-      Message.findOne({ board: req.params.board, _id: mongoose.Types.ObjectId(req.body.thread_id) }, async (err, doc) => {
-        if (err) {
-          throw err;
-        }
-        if (!doc) {
-          res.send('invalid thread ID');
-        } else {
-          const result = doc.replies.findIndex(({ _id }) => {
-            return JSON.stringify(_id) === `"${req.body.reply_id}"`;
-          });
-          if (isNaN(result)) {
-            res.send('invalid reply ID');
-          } else if (doc.replies[result].delete_password === req.body.delete_password) {
-            doc.replies[result].text = '[deleted]';
-            await doc.save();
-            res.send('success');
+      Message.findOne(
+        { board: req.params.board, _id: mongoose.Types.ObjectId(req.body.thread_id) },
+        async (err, doc) => {
+          if (err) {
+            throw err;
+          }
+          if (!doc) {
+            res.send('invalid thread ID');
           } else {
-            res.send('incorrect password');
+            const result = doc.replies.findIndex(({ _id }) => {
+              return JSON.stringify(_id) === `"${req.body.reply_id}"`;
+            });
+            if (isNaN(result)) {
+              res.send('invalid reply ID');
+            } else if (doc.replies[result].delete_password === req.body.delete_password) {
+              doc.replies[result].text = '[deleted]';
+              await doc.save();
+              res.send('success');
+            } else {
+              res.send('incorrect password');
+            }
           }
         }
-      });
+      );
     });
-
 };
